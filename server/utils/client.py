@@ -26,8 +26,6 @@ async def refresh_client_status(client: Client, app=None) -> tuple[str, bool | N
     status, enable_GP_cost = await fetch_status(client.url)
     if enable_GP_cost is not None:
         client.enable_GP_cost = enable_GP_cost
-    print(type(status))
-    print(status)
     client.status = "正常"
     if status == "网络异常":
         client.status = "网络异常"
@@ -99,5 +97,4 @@ async def get_available_clients(require_GP: int) -> list[Client]:
                 clients.append(x)
 
     random.shuffle(clients)
-    print(clients)
     return clients

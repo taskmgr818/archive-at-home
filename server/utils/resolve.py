@@ -2,9 +2,8 @@ from collections import defaultdict
 from datetime import datetime
 from urllib.parse import urljoin
 
-from loguru import logger
-
 from db.db import ArchiveHistory
+from loguru import logger
 from utils.client import get_available_clients
 from utils.ehentai import get_gdata, get_GP_cost
 from utils.http_client import http
@@ -79,18 +78,23 @@ async def get_download_url(user, gid, token, image_quality, require_GP):
         try:
             response = await http.post(
                 urljoin(client.url, "/resolve"),
-                json={"username": user.name, "gid": gid, "token": token, "image_quality": image_quality},
+                json={
+                    "username": user.name,
+                    "gid": gid,
+                    "token": token,
+                    "image_quality": image_quality,
+                },
                 timeout=60,
             )
             data = response.json()
 
             # 更新节点状态
             status = data["status"]["msg"]
-            if status['Free'] == 0 and client.enable_GP_cost == 0:
+            if status["Free"] == 0 and client.enable_GP_cost == 0:
                 client.status = "配额不足，停止解析"
-            client.EX = status['EX']
-            client.GP = status['GP']
-            client.Credits = status['Credits']
+            client.EX = status["EX"]
+            client.GP = status["GP"]
+            client.Credits = status["Credits"]
             client.enable_GP_cost = data["status"]["enable_GP_cost"]
             await client.save()
 
@@ -109,7 +113,7 @@ async def get_download_url(user, gid, token, image_quality, require_GP):
             error_msg = data.get("msg")
         except Exception as e:
             client.status = "异常"
-            client.save()
+            await client.save()
             error_msg = e
         logger.error(
             f"节点 {client.url} 解析 https://e-hentai.org/g/{gid}/{token}/ 失败：{error_msg}"

@@ -1,10 +1,9 @@
 import re
-from bs4 import BeautifulSoup
 
 import httpx
-from loguru import logger
-
+from bs4 import BeautifulSoup
 from config.config import config
+from loguru import logger
 
 http = httpx.AsyncClient(proxy=config["proxy"])
 
@@ -44,32 +43,28 @@ async def _archiver(gid, token, data=None):
 
 async def get_GP_cost(gid, token, image_quality):
     response = await _archiver(gid, token)
-    soup = BeautifulSoup(response, 'html.parser')
-    GPs = soup.find_all('strong')
+    soup = BeautifulSoup(response, "html.parser")
+    GPs = soup.find_all("strong")
     if image_quality == "org":
         if GPs[0].text == "Free!":
             client_GP_cost = 0
         else:
-            client_GP_cost = ''.join([ch for ch in GPs[0].text if ch.isdigit()])
+            client_GP_cost = "".join([ch for ch in GPs[0].text if ch.isdigit()])
     else:
         if GPs[2].text == "Free!":
             client_GP_cost = 0
         else:
-            client_GP_cost = ''.join([ch for ch in GPs[2].text if ch.isdigit()])
+            client_GP_cost = "".join([ch for ch in GPs[2].text if ch.isdigit()])
     return client_GP_cost
 
 
 async def get_download_url(gid, token, image_quality):
-    if image_quality == "org":
-        image_quality = "org"
-    elif image_quality == "res":
-        image_quality = "res"
     response = await _archiver(
         gid,
         token,
         {
             "dltype": image_quality,
-            "dlcheck": "Download+Original+Archive",
+            "dlcheck": f"Download+{'Original' if image_quality == 'org' else 'Resample'}+Archive",
         },
     )
     d_url = re.search(r'document\.location = "(.*?)";', response, re.DOTALL).group(1)

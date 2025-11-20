@@ -70,5 +70,4 @@ async def get_status():
                 status["Credits"] = GC[1]
     except Exception as e:
         logger.error(e)
-    print(status)
     return {"msg": status, "enable_GP_cost": is_within_global_gp_limit()}
