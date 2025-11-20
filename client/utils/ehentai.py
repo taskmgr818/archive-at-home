@@ -1,10 +1,13 @@
 import re
+from bs4 import BeautifulSoup
 
 import httpx
+from loguru import logger
 
 from config.config import config
 
 http = httpx.AsyncClient(proxy=config["proxy"])
+
 
 EX_BASE_URL = "https://exhentai.org"
 EH_BASE_URL = "https://e-hentai.org"
@@ -20,9 +23,14 @@ def _get_base_url():
         res = httpx.get(EX_BASE_URL, headers=headers, proxy=config["proxy"])
         if res.text != "":
             return EX_BASE_URL
-    except:
-        pass
-    return EH_BASE_URL
+        else:
+            res = httpx.get(EH_BASE_URL, headers=headers, proxy=config["proxy"])
+            return EH_BASE_URL
+    except TimeoutError:
+        return "访问超时"
+    except Exception as e:
+        logger.error(e)
+        return "错误"
 
 
 base_url = _get_base_url()
@@ -34,22 +42,33 @@ async def _archiver(gid, token, data=None):
     return response.text
 
 
-async def get_GP_cost(gid, token):
+async def get_GP_cost(gid, token, image_quality):
     response = await _archiver(gid, token)
-    original_div = re.search(r"float:left.*float:right", response, re.DOTALL).group()
-    cost_text = re.search(r"<strong>(.*?)</strong>", original_div).group(1)
-    client_GP_cost = (
-        0 if cost_text == "Free!" else int("".join(filter(str.isdigit, cost_text)))
-    )
+    soup = BeautifulSoup(response, 'html.parser')
+    GPs = soup.find_all('strong')
+    if image_quality == "org":
+        if GPs[0].text == "Free!":
+            client_GP_cost = 0
+        else:
+            client_GP_cost = ''.join([ch for ch in GPs[0].text if ch.isdigit()])
+    else:
+        if GPs[2].text == "Free!":
+            client_GP_cost = 0
+        else:
+            client_GP_cost = ''.join([ch for ch in GPs[2].text if ch.isdigit()])
     return client_GP_cost
 
 
-async def get_download_url(gid, token):
+async def get_download_url(gid, token, image_quality):
+    if image_quality == "org":
+        image_quality = "org"
+    elif image_quality == "res":
+        image_quality = "res"
     response = await _archiver(
         gid,
         token,
         {
-            "dltype": "org",
+            "dltype": image_quality,
             "dlcheck": "Download+Original+Archive",
         },
     )

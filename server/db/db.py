@@ -28,8 +28,13 @@ class GPRecord(Model):
 
 class Client(Model):
     url = fields.CharField(max_length=255)
-    status = fields.CharField(max_length=50)
     enable_GP_cost = fields.BooleanField()
+    status = fields.CharField(max_length=50)
+    EX = fields.CharField(max_length=255, default="None")
+    Free = fields.CharField(max_length=255, default="None")
+    GP = fields.CharField(max_length=255, default="None")
+    Credits = fields.CharField(max_length=255, default="None")
+
     provider = fields.ForeignKeyField("models.User", related_name="clients")
     archive_histories = fields.ReverseRelation["ArchiveHistory"]
 

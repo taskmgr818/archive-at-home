@@ -31,7 +31,7 @@ async def fetch_tag_map(_):
 
 async def get_gallery_info(gid, token):
     """获取画廊基础信息 + 缩略图"""
-    user_GP_cost, require_GP = await get_GP_cost(gid, token)
+    require_GP = await get_GP_cost(gid, token)
     gallery_info = await get_gdata(gid, token)
 
     new_tags = defaultdict(list)
@@ -59,33 +59,38 @@ async def get_gallery_info(gid, token):
         f"🕒 上传时间：{datetime.fromtimestamp(float(gallery_info['posted'])):%Y-%m-%d %H:%M}\n"
         f"📄 页数：{gallery_info['filecount']}\n\n"
         f"{tag_text}\n\n"
-        f"💰 归档消耗 GP：{user_GP_cost}</blockquote>"
+        f"💰 归档消耗 GP：原图({require_GP['org']}) 重采样({require_GP['res']})</blockquote>"
     )
 
     return (
         text,
         gallery_info["category"] != "Non-H",
         gallery_info["thumb"].replace("s.exhentai", "ehgt"),
-        user_GP_cost,
         require_GP,
     )
 
 
-async def get_download_url(user, gid, token, require_GP):
+async def get_download_url(user, gid, token, image_quality, require_GP):
     """向可用节点请求下载链接"""
-    clients = await get_available_clients(require_GP)
-
+    clients = await get_available_clients(int(require_GP))
+    if not clients:
+        return None
     for client in clients:
         try:
             response = await http.post(
                 urljoin(client.url, "/resolve"),
-                json={"username": user.name, "gid": gid, "token": token},
+                json={"username": user.name, "gid": gid, "token": token, "image_quality": image_quality},
                 timeout=60,
             )
             data = response.json()
 
             # 更新节点状态
-            client.status = data["status"]["msg"]
+            status = data["status"]["msg"]
+            if status['Free'] == 0 and client.enable_GP_cost == 0:
+                client.status = "配额不足，停止解析"
+            client.EX = status['EX']
+            client.GP = status['GP']
+            client.Credits = status['Credits']
             client.enable_GP_cost = data["status"]["enable_GP_cost"]
             await client.save()
 
@@ -103,9 +108,9 @@ async def get_download_url(user, gid, token, require_GP):
                 return data["d_url"].replace("?autostart=1", "")
             error_msg = data.get("msg")
         except Exception as e:
+            client.status = "异常"
+            client.save()
             error_msg = e
         logger.error(
             f"节点 {client.url} 解析 https://e-hentai.org/g/{gid}/{token}/ 失败：{error_msg}"
         )
-
-    return None

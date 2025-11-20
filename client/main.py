@@ -20,12 +20,13 @@ async def resolve(request: Request):
         data = await request.json()
         gid = data["gid"]
         token = data["token"]
-        require_GP = await get_GP_cost(gid, token)
+        image_quality = data['image_quality']
+        require_GP = int(await get_GP_cost(gid, token, image_quality))
         if config["ehentai"]["max_GP_cost"] == 0 and require_GP > 0:
             msg = "Rejected"
             d_url = None
         else:
-            d_url = await get_download_url(gid, token)
+            d_url = await get_download_url(gid, token, image_quality)
             msg = "Success"
             if config["ehentai"]["max_GP_cost"] > 0:
                 GP_usage_log.append((time.time(), require_GP))

@@ -2,6 +2,8 @@ import re
 
 import httpx
 
+from bs4 import BeautifulSoup
+
 from config.config import cfg
 from utils.http_client import http
 
@@ -36,14 +38,47 @@ async def get_gdata(gid, token):
 
 
 async def get_GP_cost(gid, token):
+    def convert_to_mib(size_str):
+        # 匹配数字和单位，并允许单位后有额外空格
+        match = re.match(r"(\d+\.?\d*)\s*(\w+)?", size_str.strip())
+        
+        if not match:
+            raise ValueError(f"Invalid size format: {size_str}")  # 捕获具体的大小格式
+        
+        size = float(match.group(1))  # 获取数字部分
+        unit = match.group(2)  # 获取单位部分，如果没有单位则返回 None
+
+        # 如果没有单位，默认按 MiB 计算
+        if unit is None:
+            unit = "MiB"
+
+        # 根据单位转换为 MiB
+        conversion_factors = {
+            "gib": 1024,         # 1 GiB = 1024 MiB
+            "gb": 1024 / 1.048576,  # 1 GB = 976.5625 MiB
+            "mib": 1,            # 1 MiB = 1 MiB
+            "mb": 1 / 1.048576,   # 1 MB = 0.953674 MiB
+            "kib": 1 / 1024,     # 1 KiB = 0.0009765625 MiB
+            "kb": 1 / 1024 / 1.048576,  # 1 KB = 0.000931322 MiB
+        }
+
+        if unit.lower() in conversion_factors:
+            return (size * conversion_factors[unit.lower()]) * 21
+        else:
+            raise ValueError(f"Unsupported unit: {unit}")
+
+    
+    require_GP = {"org": None, "res": None}
     url = f"{base_url}/archiver.php?gid={gid}&token={token}"
     response = await http.post(url, headers=headers)
-    original_div = re.search(
-        r"float:left.*float:right", response.text, re.DOTALL
-    ).group()
-    cost_text, file_size = re.findall(r"<strong>(.*?)</strong>", original_div)
-    user_GP_cost = int(
-        float((f := file_size.split())[0])
-        * {"KiB": 20 / 1024, "MiB": 20, "GiB": 20480}[f[1]]
-    )
-    return user_GP_cost, cost_text != "Free!"
+    soup = BeautifulSoup(response.text, 'html.parser')
+    GPs = soup.find_all('strong')
+    if GPs:
+        if GPs[2].text == "Free!":
+            require_GP["org"], require_GP["res"] = round(float(convert_to_mib(GPs[1].text))), round(float(convert_to_mib(GPs[3].text)))
+        else:
+            require_GP['org'], require_GP["res"] = ''.join([ch for ch in GPs[0].text if ch.isdigit()]), ''.join([ch for ch in GPs[2].text if ch.isdigit()])
+    else:
+        if response.url == "https://e-hentai.org/bounce_login.php?b=d&bt=1-4":
+            return "服务器cookie异常"
+    return require_GP

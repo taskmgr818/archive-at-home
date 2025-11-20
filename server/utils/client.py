@@ -1,6 +1,7 @@
 import asyncio
 import random
 from urllib.parse import urljoin
+from tortoise.queryset import Q
 
 from loguru import logger
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -23,21 +24,39 @@ async def fetch_status(url: str) -> tuple[str, bool | None]:
 async def refresh_client_status(client: Client, app=None) -> tuple[str, bool | None]:
     """刷新单个节点状态"""
     status, enable_GP_cost = await fetch_status(client.url)
-    client.status = status
     if enable_GP_cost is not None:
         client.enable_GP_cost = enable_GP_cost
+    print(type(status))
+    print(status)
+    client.status = "正常"
+    if status == "网络异常":
+        client.status = "网络异常"
+    else:
+        if status["EX"] != "EX":
+            client.status = "无法访问ex站点! "
+        elif not status['Free'] and not enable_GP_cost:
+            client.status = "配额不足! "
+        else:
+            if status['GP'] and status['Credits']:
+                if int(status['GP']) < 50000 and int(status['Credits']) < 10000:
+                    client.status = "GP和C不足! "
+            else:
+                client.status = "无法获得GP和C! "
+        client.EX = status['EX']
+        client.Free = status['Free']
+        client.GP = status['GP']
+        client.Credits = status['Credits']
+        if "http" in status['EX'] and app:
+            text = f"节点异常\nURL：{client.url}\n状态：{status['EX']}"
+            keyboard = [
+                [InlineKeyboardButton("管理节点", callback_data=f"client|{client.id}")]
+            ]
+            await app.bot.sendMessage(
+                client.provider_id,
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
     await client.save()
-
-    if "异常" in status and app:
-        text = f"节点异常\nURL：{client.url}\n状态：{status}"
-        keyboard = [
-            [InlineKeyboardButton("管理节点", callback_data=f"client|{client.id}")]
-        ]
-        await app.bot.sendMessage(
-            client.provider_id,
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
 
     return status, client.enable_GP_cost
 
@@ -58,24 +77,27 @@ async def add_client(user_id: int, url: str) -> tuple[bool, str, bool | None]:
     await Client.create(
         provider=await User.get(id=user_id),
         url=url,
-        status=status,
+        status="正常",
         enable_GP_cost=enable_GP_cost,
+        EX = status['EX'],
+        Free = status['Free'],
+        GP = status['GP'],
+        Credits = status['Credits'],
     )
     return True, status, enable_GP_cost
 
 
-async def get_available_clients(require_GP: bool) -> list[Client]:
+async def get_available_clients(require_GP: int) -> list[Client]:
     """获取可用节点"""
-    clients = await Client.filter(status__in=["正常", "无免费额度"])
-    if require_GP:
-        eligible = [c for c in clients if c.enable_GP_cost]
-        random.shuffle(eligible)
-        return eligible
+    clients = []
+    c = await Client.all()
+    for x in c:
+        if x.enable_GP_cost == 0 and x.Free == 0:
+            continue
+        if x.status == "正常":
+            if int(x.GP) >= int(require_GP):
+                clients.append(x)
 
-    normal = [c for c in clients if c.status == "正常"]
-    fallback = [c for c in clients if c.status == "无免费额度" and c.enable_GP_cost]
-
-    random.shuffle(normal)
-    random.shuffle(fallback)
-
-    return normal + fallback
+    random.shuffle(clients)
+    print(clients)
+    return clients

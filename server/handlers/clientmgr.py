@@ -131,7 +131,7 @@ async def client_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
 
     for idx, client in enumerate(clients, start=1):
-        text_lines.append(
+        text_lines.append(  
             f"🔹 节点 {idx}:\n    🌐 URL：{client.url}\n    📡 状态：{client.status}"
         )
         keyboard.append(
@@ -157,6 +157,8 @@ async def client_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📄 节点信息：\n"
         f"🌐 URL：{client.url}\n"
         f"📡 状态：{client.status}\n"
+        f"站点: {client.EX}， 免费配额: {'充足' if client.Free == "1" else '不足'}\n"
+        f"Ⓖ GP: {client.GP}， Ⓒ Credits: {client.Credits}\n"
         f"💸 允许 GP 消耗：{'是 ✅' if client.enable_GP_cost else '否 ❌'}\n\n"
         f"{usage_text}"
     )
@@ -194,8 +196,9 @@ async def edit_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status, enable_GP_cost = await refresh_client_status(client)
         text = (
             f"🔄 已刷新节点状态\n"
-            f"📡 当前状态：{status}\n"
-            f"💸 允许 GP 消耗：{'是 ✅' if enable_GP_cost else '否 ❌'}"
+            f"站点: {status['EX']}， 免费配额: {'充足' if status['Free'] == 1 else '不足'}\n"
+            f"Ⓖ GP: {status['GP']}， Ⓒ Credits: {status['Credits']}\n"
+            f"💸 允许 GP 消耗：{'是 ✅' if enable_GP_cost else '否 ❌'}\n\n"
         )
         logger.info(f"{update.effective_user.name} 刷新/启用节点 {client.url}")
     elif action == "suspend":
