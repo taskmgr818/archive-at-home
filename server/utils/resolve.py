@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime
+import time
 from urllib.parse import urljoin
 
 from loguru import logger
@@ -62,17 +63,20 @@ async def get_gallery_info(gid, token):
         f"💰 归档消耗 GP：原图({require_GP['org']}) 重采样({require_GP['res']})</blockquote>"
     )
 
+    posted_ts = float(gallery_info['posted'])
+    now_ts = time.time()
     return (
         text,
         gallery_info["category"] != "Non-H",
         gallery_info["thumb"].replace("s.exhentai", "ehgt"),
         require_GP,
+        1 if now_ts - posted_ts > 365 * 24 * 3600 else 0
     )
 
 
-async def get_download_url(user, gid, token, image_quality, require_GP):
+async def get_download_url(user, gid, token, image_quality, require_GP, timeout):
     """向可用节点请求下载链接"""
-    clients = await get_available_clients(int(require_GP))
+    clients = await get_available_clients(int(require_GP), timeout)
     if not clients:
         return None
     for client in clients:

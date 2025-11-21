@@ -193,12 +193,13 @@ async def edit_client(update: Update, context: ContextTypes.DEFAULT_TYPE):
     client = await Client.get(id=client_id)
 
     if action == "refresh":
-        status, enable_GP_cost = await refresh_client_status(client)
+        await refresh_client_status(client)
         text = (
             f"🔄 已刷新节点状态\n"
-            f"站点: {status['EX']}， 免费配额: {'充足' if status['Free'] == 1 else '不足'}\n"
-            f"Ⓖ GP: {status['GP']}， Ⓒ Credits: {status['Credits']}\n"
-            f"💸 允许 GP 消耗：{'是 ✅' if enable_GP_cost else '否 ❌'}\n\n"
+            f"状态: {client.status}"
+            f"站点: {client.EX}， 免费配额: {'充足' if client.Free == 1 else '不足'}\n"
+            f"Ⓖ GP: {client.GP}， Ⓒ Credits: {client.Credits}\n"
+            f"💸 允许 GP 消耗：{'是 ✅' if client.enable_GP_cost else '否 ❌'}\n\n"
         )
         logger.info(f"{update.effective_user.name} 刷新/启用节点 {client.url}")
     elif action == "suspend":
@@ -241,12 +242,12 @@ async def get_new_url_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     client.url = url
     await client.save()
 
-    status, enable_GP_cost = await refresh_client_status(client)
+    await refresh_client_status(client)
     text = (
         f"✅ 编辑成功\n"
         f"🌐 URL：{url}\n"
-        f"📡 状态：{status}\n"
-        f"💸 允许 GP 消耗：{'是 ✅' if enable_GP_cost else '否 ❌'}"
+        f"📡 状态：{client.status}\n"
+        f"💸 允许 GP 消耗：{'是 ✅' if client.enable_GP_cost else '否 ❌'}"
     )
     logger.info(f"{update.effective_user.name} 编辑节点 URL {url}")
 

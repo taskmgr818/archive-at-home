@@ -30,22 +30,26 @@ async def refresh_client_status(client: Client, app=None) -> tuple[str, bool | N
     if status == "网络异常":
         client.status = "网络异常"
     else:
-        if status["EX"] != "EX":
-            client.status = "无法访问ex站点! "
-        elif not status["Free"] and not enable_GP_cost:
-            client.status = "配额不足! "
-        else:
-            if status["GP"] and status["Credits"]:
-                if int(status["GP"]) < 50000 and int(status["Credits"]) < 10000:
-                    client.status = "GP和C不足! "
+        try:
+            if status["EX"] != "EX":
+                client.status = "无法访问ex站点! "
+            elif not status["Free"] and not enable_GP_cost:
+                client.status = "配额不足! "
             else:
-                client.status = "无法获得GP和C! "
-        client.EX = status["EX"]
-        client.Free = status["Free"]
-        client.GP = status["GP"]
-        client.Credits = status["Credits"]
-        if "http" in status["EX"] and app:
-            text = f"节点异常\nURL：{client.url}\n状态：{status['EX']}"
+                if status["GP"] and status["Credits"]:
+                    if int(status["GP"]) < 50000 and int(status["Credits"]) < 10000:
+                        client.status = "GP和C不足! "
+                else:
+                    client.status = "无法获得GP和C! "
+            client.EX = status["EX"]
+            client.Free = status["Free"]
+            client.GP = status["GP"]
+            client.Credits = status["Credits"]
+        except TypeError as e:
+            if "string indices must be integers" in str(e):
+                client.status = str(e)
+        if (type(status) == str or "http" in status["EX"]) and app:
+            text = f"节点异常\nURL：{client.url}\n状态：{status}"
             keyboard = [
                 [InlineKeyboardButton("管理节点", callback_data=f"client|{client.id}")]
             ]
@@ -56,7 +60,7 @@ async def refresh_client_status(client: Client, app=None) -> tuple[str, bool | N
             )
     await client.save()
 
-    return status, client.enable_GP_cost
+    return client.enable_GP_cost
 
 
 async def refresh_all_clients(app=None):
@@ -85,16 +89,19 @@ async def add_client(user_id: int, url: str) -> tuple[bool, str, bool | None]:
     return True, status, enable_GP_cost
 
 
-async def get_available_clients(require_GP: int) -> list[Client]:
+async def get_available_clients(require_GP: int, timeout: int) -> list[Client]:
     """获取可用节点"""
     clients = []
     c = await Client.all()
     for x in c:
         if x.enable_GP_cost == 0 and x.Free == 0:
             continue
+        if timeout == 1 and x.enable_GP_cost == 0:
+            continue
         if x.status == "正常":
-            if int(x.GP) >= int(require_GP):
-                clients.append(x)
+            if x.GP != "None":
+                if int(x.GP) >= int(require_GP):
+                    clients.append(x)
 
     random.shuffle(clients)
     return clients
