@@ -6,7 +6,7 @@ from loguru import logger
 
 from db.db import ArchiveHistory
 from utils.client import get_available_clients
-from utils.ehentai import get_gdata, get_GP_cost
+from utils.ehentai import get_gdata, get_user_GP_cost
 from utils.http_client import http
 
 
@@ -31,7 +31,7 @@ async def fetch_tag_map(_):
 
 async def get_gallery_info(gid, token):
     """获取画廊基础信息 + 缩略图"""
-    user_GP_cost, require_GP = await get_GP_cost(gid, token)
+    user_GP_cost = await get_user_GP_cost(gid, token)
     gallery_info = await get_gdata(gid, token)
 
     new_tags = defaultdict(list)
@@ -67,13 +67,12 @@ async def get_gallery_info(gid, token):
         gallery_info["category"] != "Non-H",
         gallery_info["thumb"].replace("s.exhentai", "ehgt"),
         user_GP_cost,
-        require_GP,
     )
 
 
-async def get_download_url(user, gid, token, require_GP):
+async def get_download_url(user, gid, token):
     """向可用节点请求下载链接"""
-    clients = await get_available_clients(require_GP)
+    clients = await get_available_clients()
 
     for client in clients:
         try:

@@ -17,9 +17,7 @@ async def reply_gallery_info(
     logger.info(f"解析画廊 {url}")
 
     try:
-        text, has_spoiler, thumb, user_GP_cost, require_GP = await get_gallery_info(
-            gid, token
-        )
+        text, has_spoiler, thumb, user_GP_cost = await get_gallery_info(gid, token)
     except Exception as e:
         await msg.edit_text("❌ 画廊解析失败，请检查链接或稍后再试")
         logger.error(f"画廊 {url} 解析失败：{e}")
@@ -33,7 +31,7 @@ async def reply_gallery_info(
         keyboard[0].append(
             InlineKeyboardButton(
                 "📦 归档下载",
-                callback_data=f"download|{gid}|{token}|{1 if require_GP else 0}|{user_GP_cost}",
+                callback_data=f"download|{gid}|{token}|{user_GP_cost}",
             )
         )
         if cfg["AD"]["text"] and cfg["AD"]["url"]:
@@ -81,7 +79,7 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("🚫 您已被封禁")
         return
 
-    _, gid, token, require_GP, user_GP_cost = query.data.split("|")
+    _, gid, token, user_GP_cost = query.data.split("|")
     user_GP_cost = int(user_GP_cost)
 
     current_GP = get_current_GP(user)
@@ -102,7 +100,7 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     logger.info(f"获取 https://e-hentai.org/g/{gid}/{token}/ 下载链接")
 
-    d_url = await get_download_url(user, gid, token, require_GP == "1")
+    d_url = await get_download_url(user, gid, token)
     if d_url:
         await deduct_GP(user, user_GP_cost)
         keyboard = InlineKeyboardMarkup(

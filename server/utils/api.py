@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from db.db import User
-from utils.ehentai import get_GP_cost
+from utils.ehentai import get_user_GP_cost
 from utils.GP_action import checkin, deduct_GP, get_current_GP
 from utils.resolve import get_download_url
 
@@ -57,14 +57,14 @@ async def verify_user(apikey: str):
 
 async def process_resolve(user, gid, token):
     try:
-        user_GP_cost, require_GP = await get_GP_cost(gid, token)
+        user_GP_cost = await get_user_GP_cost(gid, token)
     except Exception:
         return 4, "获取画廊信息失败", None
 
     if get_current_GP(user) < user_GP_cost:
         return 5, "GP 不足", None
 
-    d_url = await get_download_url(user, gid, token, require_GP)
+    d_url = await get_download_url(user, gid, token)
     if d_url:
         await deduct_GP(user, user_GP_cost)
         return 0, "解析成功", d_url

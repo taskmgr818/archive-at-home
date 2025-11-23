@@ -35,15 +35,15 @@ async def get_gdata(gid, token):
     return result
 
 
-async def get_GP_cost(gid, token):
+async def get_user_GP_cost(gid, token):
     url = f"{base_url}/archiver.php?gid={gid}&token={token}"
     response = await http.post(url, headers=headers)
     original_div = re.search(
         r"float:left.*float:right", response.text, re.DOTALL
     ).group()
-    cost_text, file_size = re.findall(r"<strong>(.*?)</strong>", original_div)
+    file_size = re.findall(r"<strong>(.*?)</strong>", original_div)[1]
     user_GP_cost = int(
         float((f := file_size.split())[0])
         * {"KiB": 20 / 1024, "MiB": 20, "GiB": 20480}[f[1]]
     )
-    return user_GP_cost, cost_text != "Free!"
+    return user_GP_cost
