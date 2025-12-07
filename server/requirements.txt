@@ -6,3 +6,4 @@ PyYAML
 tortoise-orm
 fastapi
 uvicorn
+telepress

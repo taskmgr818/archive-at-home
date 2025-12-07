@@ -34,6 +34,12 @@ async def reply_gallery_info(
                 callback_data=f"download|{gid}|{token}|{user_GP_cost}",
             )
         )
+        keyboard.append(
+            [InlineKeyboardButton(
+                "📝 推送到 Telegraph",
+                callback_data=f"telegraph|{gid}|{token}",
+            )]
+        )
         if cfg["AD"]["text"] and cfg["AD"]["url"]:
             keyboard.append(
                 [InlineKeyboardButton(cfg["AD"]["text"], url=cfg["AD"]["url"])]

@@ -47,3 +47,9 @@ async def get_user_GP_cost(gid, token):
         * {"KiB": 20 / 1024, "MiB": 20, "GiB": 20480}[f[1]]
     )
     return user_GP_cost
+
+
+async def get_gallery_html(gid, token):
+    url = f"{base_url}/g/{gid}/{token}/"
+    response = await http.get(url, headers=headers)
+    return response.text
