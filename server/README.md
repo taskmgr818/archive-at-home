@@ -365,8 +365,8 @@ Node 通过 WebSocket 连接到 `/ws`。
 
 ### GP 成本追踪
 
-- Server 请求 E-Hentai 获取预估 GP
-- 任务创建时冻结余额
+- 任务先原子入队/合并（并在 Lua 内检查缓存）
+- 仅在确认“新建任务”后请求 E-Hentai 获取预估 GP 并冻结余额
 - Node 回报实际消耗，结算或退款
 
 ---
@@ -389,9 +389,10 @@ Node 通过 WebSocket 连接到 `/ws`。
 
 | 脚本 | 功能 |
 |------|------|
-| `LuaPublishTask` | 原子创建任务 + 请求合并检查 |
+| `LuaPublishTask` | 原子创建任务 + 请求合并 + 缓存短路 |
 | `LuaFetchTask` | 原子抢占：PENDING → PROCESSING + 租约 |
 | `LuaCompleteTask` | 原子完成：写入缓存 + 清理 sentinel |
+| `LuaCancelTask` | 取消未处理任务并清理合并状态 |
 | `LuaReclaimTask` | 租约过期任务重新入队 |
 
 ---

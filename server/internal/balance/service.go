@@ -3,6 +3,7 @@ package balance
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -90,16 +91,6 @@ func (s *balanceService) Deposit(ctx context.Context, userID string, amount int6
 	})
 }
 
-// CanAfford checks if user has enough balance for the estimated GP cost.
-func (s *balanceService) CanAfford(ctx context.Context, userID string, estimatedGP int64) (bool, error) {
-	acc, err := s.GetAccount(ctx, userID)
-	if err != nil {
-		return false, err
-	}
-	available := acc.Balance - acc.Frozen
-	return available >= estimatedGP, nil
-}
-
 // FreezeGP reserves GP for an in-flight task.
 func (s *balanceService) FreezeGP(ctx context.Context, userID string, traceID string, amount int64) error {
 	_, err := s.withTx(ctx, func(tx *gorm.DB) (*Account, error) {
@@ -108,8 +99,7 @@ func (s *balanceService) FreezeGP(ctx context.Context, userID string, traceID st
 			return nil, err
 		}
 
-		available := acc.Balance - acc.Frozen
-		if available < amount {
+		if acc.Available() < amount {
 			return nil, ErrInsufficientBalance
 		}
 
@@ -149,6 +139,8 @@ func (s *balanceService) SettleTask(ctx context.Context, userID string, traceID 
 		// Unfreeze the reserved amount
 		acc.Frozen -= frozenAmount
 		if acc.Frozen < 0 {
+			log.Printf("[balance] WARNING: frozen went negative for user=%s trace=%s (frozen=%d amount=%d), resetting to 0",
+				userID, traceID, acc.Frozen+frozenAmount, frozenAmount)
 			acc.Frozen = 0
 		}
 
@@ -201,6 +193,8 @@ func (s *balanceService) RefundTask(ctx context.Context, userID string, traceID 
 		// Unfreeze the reserved amount
 		acc.Frozen -= frozenAmount
 		if acc.Frozen < 0 {
+			log.Printf("[balance] WARNING: frozen went negative for user=%s trace=%s (frozen=%d amount=%d), resetting to 0",
+				userID, traceID, acc.Frozen+frozenAmount, frozenAmount)
 			acc.Frozen = 0
 		}
 		acc.UpdatedAt = time.Now()

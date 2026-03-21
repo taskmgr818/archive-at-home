@@ -71,7 +71,7 @@ func (h *UserHandler) MyBalance(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, BalanceResponse{
-		Balance: acc.Balance - acc.Frozen,
+		Balance: acc.Available(),
 	})
 }
 
@@ -96,7 +96,7 @@ func (h *UserHandler) Me(c *gin.Context) {
 	var balance int64
 	acc, err := h.balanceSvc.GetAccount(ctx, user.ID)
 	if err == nil {
-		balance = acc.Balance - acc.Frozen
+		balance = acc.Available()
 	}
 
 	c.JSON(http.StatusOK, model.UserProfile{

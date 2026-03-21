@@ -41,53 +41,51 @@ local fields = redis.call("HMGET", taskKey, "gallery_id", "gallery_key")
 return {"OK", fields[1], fields[2]}
 `
 
-// LuaCompleteTask atomically marks a task as COMPLETED and stores
-// the result in the per-user cache key.
+// LuaCompleteTask atomically marks a task as COMPLETED, stores the result
+// in the per-user cache, and cleans up collapsing/queue entries.
+// Derives cache and collapsing keys from the task's user_id/gallery_id fields.
 //
-// KEYS[1] = task:{traceID}               (hash)
-// KEYS[2] = cache:{userID}:{galleryID}   (string – archive URL)
-// KEYS[3] = inflight:{userID}:{galleryID}(collapsing key)
-// KEYS[4] = queue:pending                (list)
+// KEYS[1] = task:{traceID}  (hash)
 // ARGV[1] = archive URL
 // ARGV[2] = cacheTTL (seconds)
 // ARGV[3] = nodeID (requesting node)
-// ARGV[4] = actualGP
+// ARGV[4] = traceID
 //
 // Returns: "OK", "INVALID", or "NODE_MISMATCH"
 const LuaCompleteTask = `
-local taskKey      = KEYS[1]
-local cacheKey     = KEYS[2]
-local collapseKey  = KEYS[3]
-local queueKey     = KEYS[4]
-local archiveURL   = ARGV[1]
-local cacheTTL     = tonumber(ARGV[2])
-local nodeID       = ARGV[3]
-local actualGP     = ARGV[4]
+local taskKey    = KEYS[1]
+local archiveURL = ARGV[1]
+local cacheTTL   = tonumber(ARGV[2])
+local nodeID     = ARGV[3]
+local traceID    = ARGV[4]
 
 local status = redis.call("HGET", taskKey, "status")
 if status ~= "PROCESSING" then
     return "INVALID"
 end
 
--- Verify the task is still assigned to this node (prevent stale completion)
 local assignedNode = redis.call("HGET", taskKey, "node_id")
 if assignedNode ~= nodeID then
     return "NODE_MISMATCH"
 end
 
--- 1. Mark task done and record actual GP
-redis.call("HMSET", taskKey, "status", "COMPLETED", "actual_gp", actualGP)
-redis.call("EXPIRE", taskKey, 300)  -- keep metadata 5 min for diagnostics
+-- Derive cache and collapsing keys from task metadata
+local fields = redis.call("HMGET", taskKey, "user_id", "gallery_id")
+local userID    = fields[1]
+local galleryID = fields[2]
 
--- 2. Store result in per-user cache with 7-day TTL
-redis.call("SET", cacheKey, archiveURL, "EX", cacheTTL)
+-- 1. Mark task done
+redis.call("HSET", taskKey, "status", "COMPLETED")
+redis.call("EXPIRE", taskKey, 300)
 
--- 3. Remove collapsing key so future requests create new tasks
-redis.call("DEL", collapseKey)
+-- 2. Store result in per-user cache
+redis.call("SET", "cache:" .. userID .. ":" .. galleryID, archiveURL, "EX", cacheTTL)
 
--- 4. Remove completed task from pending queue
-local traceID = redis.call("HGET", taskKey, "trace_id")
-redis.call("LREM", queueKey, 0, traceID)
+-- 3. Remove collapsing key
+redis.call("DEL", "inflight:" .. userID .. ":" .. galleryID)
+
+-- 4. Remove from pending queue
+redis.call("LREM", "queue:pending", 0, traceID)
 
 return "OK"
 `
@@ -98,31 +96,38 @@ return "OK"
 // KEYS[1] = task:{traceID}                (hash to create)
 // KEYS[2] = inflight:{userID}:{galleryID} (collapsing sentinel)
 // KEYS[3] = queue:pending                 (list)
+// KEYS[4] = cache:{userID}:{galleryID}    (per-user cached archive URL)
 // ARGV[1] = traceID
 // ARGV[2] = userID
 // ARGV[3] = galleryID
 // ARGV[4] = force   ("0" or "1")
 // ARGV[5] = leaseTTL (seconds) – used for inflight key expiry
 // ARGV[6] = galleryKey
-// ARGV[7] = freeTier ("0" or "1")
-// ARGV[8] = estimatedGP
 //
 // Returns:
 //
-//	"CREATED"   – new task created
-//	traceID     – existing inflight task (collapsed)
+//	{"CREATED", traceID}    – new task created
+//	{"COLLAPSED", traceID}  – existing inflight task reused
+//	{"CACHED", archiveURL}  – result already cached (force=false only)
 const LuaPublishTask = `
 local taskKey      = KEYS[1]
 local collapseKey  = KEYS[2]
 local queueKey     = KEYS[3]
+local cacheKey     = KEYS[4]
 local traceID      = ARGV[1]
 local userID       = ARGV[2]
 local galleryID    = ARGV[3]
 local force        = ARGV[4]
 local leaseTTL     = tonumber(ARGV[5])
 local galleryKey   = ARGV[6]
-local freeTier     = ARGV[7]
-local estimatedGP  = ARGV[8]
+
+-- If force=false and cache already exists, return cached immediately.
+if force == "0" then
+    local cached = redis.call("GET", cacheKey)
+    if cached then
+        return {"CACHED", cached}
+    end
+end
 
 -- Request Collapsing: check if an identical task is already in-flight
 local existing = redis.call("GET", collapseKey)
@@ -131,7 +136,7 @@ if existing then
     local existingTaskKey = "task:" .. existing
     local existingStatus = redis.call("HGET", existingTaskKey, "status")
     if existingStatus == "PENDING" or existingStatus == "PROCESSING" then
-        return existing  -- return the traceID of the existing task
+        return {"COLLAPSED", existing}  -- return the traceID of the existing task
     end
     -- Task expired, clear stale collapseKey and create new task
     redis.call("DEL", collapseKey)
@@ -139,15 +144,13 @@ end
 
 -- Create the task hash
 redis.call("HMSET", taskKey,
-    "trace_id",      traceID,
     "user_id",       userID,
     "gallery_id",    galleryID,
     "gallery_key",   galleryKey,
     "status",        "PENDING",
     "force",         force,
-    "free_tier",     freeTier,
-    "estimated_gp",  estimatedGP,
-    "actual_gp",     "0",
+    "free_tier",     "0",
+    "estimated_gp",  "0",
     "node_id",       ""
 )
 redis.call("EXPIRE", taskKey, leaseTTL * 3)  -- generous TTL for the hash itself
@@ -158,7 +161,7 @@ redis.call("SET", collapseKey, traceID, "EX", leaseTTL * 2)
 -- Push to pending queue
 redis.call("RPUSH", queueKey, traceID)
 
-return "CREATED"
+return {"CREATED", traceID}
 `
 
 // LuaReclaimTask handles timeout/failure recovery:
@@ -170,6 +173,7 @@ return "CREATED"
 // KEYS[2] = inflight:{userID}:{galleryID} (collapsing key)
 // KEYS[3] = queue:pending                 (list)
 // ARGV[1] = leaseTTL (seconds)
+// ARGV[2] = traceID
 //
 // Returns:
 //
@@ -180,6 +184,7 @@ local taskKey      = KEYS[1]
 local collapseKey  = KEYS[2]
 local queueKey     = KEYS[3]
 local leaseTTL     = tonumber(ARGV[1])
+local traceID      = ARGV[2]
 
 -- Check if task exists and is PROCESSING
 local status = redis.call("HGET", taskKey, "status")
@@ -194,12 +199,44 @@ redis.call("HMSET", taskKey,
 )
 redis.call("EXPIRE", taskKey, leaseTTL * 3)
 
--- Re-enqueue first
-local traceID = redis.call("HGET", taskKey, "trace_id")
+-- Re-enqueue
 redis.call("RPUSH", queueKey, traceID)
 
 -- Re-set collapsing key to protect the re-enqueued task from duplication
 redis.call("SET", collapseKey, traceID, "EX", leaseTTL * 2)
 
 return "RECLAIMED"
+`
+
+// LuaCancelTask cancels a not-yet-processing task and clears collapse state.
+//
+// KEYS[1] = task:{traceID}
+// KEYS[2] = inflight:{userID}:{galleryID}
+// KEYS[3] = queue:pending
+// ARGV[1] = traceID
+//
+// Returns:
+//
+//	"CANCELLED"     – task removed and collapse key cleared
+//	"NOT_CANCELLED" – task already processing/completed
+//	"GONE"          – task key already missing
+const LuaCancelTask = `
+local taskKey = KEYS[1]
+local collapseKey = KEYS[2]
+local queueKey = KEYS[3]
+local traceID = ARGV[1]
+
+local status = redis.call("HGET", taskKey, "status")
+if not status then
+    return "GONE"
+end
+
+if status == "PROCESSING" or status == "COMPLETED" then
+    return "NOT_CANCELLED"
+end
+
+redis.call("DEL", taskKey)
+redis.call("DEL", collapseKey)
+redis.call("LREM", queueKey, 0, traceID)
+return "CANCELLED"
 `

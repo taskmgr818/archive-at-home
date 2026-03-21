@@ -181,7 +181,7 @@ func (h *Hub) HandleTaskResult(ctx context.Context, c *Client, result *model.Tas
 		result.TraceID, c.NodeID, result.Success)
 
 	if result.Success && result.ArchiveURL != "" {
-		if err := h.sched.CompleteTask(ctx, result.TraceID, c.NodeID, result.ArchiveURL, result.ActualGP); err != nil {
+		if err := h.sched.CompleteTask(ctx, result.TraceID, c.NodeID, result.ArchiveURL); err != nil {
 			log.Printf("[hub] complete task error: %v", err)
 		}
 	}

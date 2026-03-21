@@ -11,6 +11,14 @@ import (
 	"github.com/taskmgr818/archive-at-home/server/internal/model"
 )
 
+type PublishStatus int
+
+const (
+	PublishCreated PublishStatus = iota
+	PublishCollapsed
+	PublishCached
+)
+
 // Scheduler manages task lifecycle via Redis.
 type Scheduler struct {
 	rdb *redis.Client
@@ -21,6 +29,7 @@ type Scheduler struct {
 	completeScript *redis.Script
 	publishScript  *redis.Script
 	reclaimScript  *redis.Script
+	cancelScript   *redis.Script
 }
 
 // NewScheduler initialises the scheduler and loads Lua scripts.
@@ -32,7 +41,15 @@ func NewScheduler(rdb *redis.Client, cfg *config.Config) *Scheduler {
 		completeScript: redis.NewScript(LuaCompleteTask),
 		publishScript:  redis.NewScript(LuaPublishTask),
 		reclaimScript:  redis.NewScript(LuaReclaimTask),
+		cancelScript:   redis.NewScript(LuaCancelTask),
 	}
+}
+
+func boolToFlag(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }
 
 // ─────────────────────────────────────────────
@@ -40,35 +57,39 @@ func NewScheduler(rdb *redis.Client, cfg *config.Config) *Scheduler {
 // ─────────────────────────────────────────────
 
 // PublishTask creates a new task or collapses into an existing one.
-// Returns the traceID (may be a different one if collapsed) and whether it was newly created.
-func (s *Scheduler) PublishTask(ctx context.Context, traceID, userID, galleryID, galleryKey string, force, freeTier bool, estimatedGP int) (string, bool, error) {
-	forceFlag := "0"
-	if force {
-		forceFlag = "1"
-	}
-	freeTierFlag := "0"
-	if freeTier {
-		freeTierFlag = "1"
-	}
+// Returns status + payload:
+//   - PublishCreated: payload is created traceID
+//   - PublishCollapsed: payload is existing traceID
+//   - PublishCached: payload is archiveURL
+func (s *Scheduler) PublishTask(ctx context.Context, traceID, userID, galleryID, galleryKey string, force bool) (PublishStatus, string, error) {
 	leaseTTL := int(s.cfg.TaskLeaseTTL.Seconds())
 
 	keys := []string{
 		model.TaskKey(traceID),
 		model.CollapsingKey(userID, galleryID),
 		model.PendingQueueKey,
+		model.CacheKey(userID, galleryID),
 	}
-	args := []interface{}{traceID, userID, galleryID, forceFlag, leaseTTL, galleryKey, freeTierFlag, estimatedGP}
+	args := []interface{}{traceID, userID, galleryID, boolToFlag(force), leaseTTL, galleryKey}
 
-	result, err := s.publishScript.Run(ctx, s.rdb, keys, args...).Text()
+	vals, err := s.publishScript.Run(ctx, s.rdb, keys, args...).StringSlice()
 	if err != nil {
-		return "", false, fmt.Errorf("publish task lua: %w", err)
+		return PublishCreated, "", fmt.Errorf("publish task lua: %w", err)
+	}
+	if len(vals) < 2 {
+		return PublishCreated, "", fmt.Errorf("publish task lua: invalid response")
 	}
 
-	if result == "CREATED" {
-		return traceID, true, nil
+	switch vals[0] {
+	case "CREATED":
+		return PublishCreated, vals[1], nil
+	case "COLLAPSED":
+		return PublishCollapsed, vals[1], nil
+	case "CACHED":
+		return PublishCached, vals[1], nil
+	default:
+		return PublishCreated, "", fmt.Errorf("publish task lua: unexpected status %s", vals[0])
 	}
-	// Collapsed into existing task – result is the existing traceID
-	return result, false, nil
 }
 
 // FetchTask lets a worker node attempt to claim a pending task.
@@ -84,7 +105,7 @@ func (s *Scheduler) FetchTask(ctx context.Context, traceID, nodeID string) (*mod
 		return nil, fmt.Errorf("fetch task lua: %w", err)
 	}
 
-	if len(vals) == 0 || vals[0] == "GONE" {
+	if vals[0] == "GONE" {
 		return nil, nil // task already claimed
 	}
 
@@ -98,28 +119,9 @@ func (s *Scheduler) FetchTask(ctx context.Context, traceID, nodeID string) (*mod
 
 // CompleteTask stores the result and updates caches.
 // nodeID must match the node currently assigned to the task.
-func (s *Scheduler) CompleteTask(ctx context.Context, traceID, nodeID, archiveURL string, actualGP int) error {
-	// Look up task metadata to build cache key
-	taskKey := model.TaskKey(traceID)
-	pipe := s.rdb.Pipeline()
-	userIDCmd := pipe.HGet(ctx, taskKey, "user_id")
-	galleryIDCmd := pipe.HGet(ctx, taskKey, "gallery_id")
-	_, err := pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("get task metadata: %w", err)
-	}
-	userID := userIDCmd.Val()
-	galleryID := galleryIDCmd.Val()
-
-	cacheTTL := int(s.cfg.CacheTTL.Seconds())
-
-	keys := []string{
-		taskKey,
-		model.CacheKey(userID, galleryID),
-		model.CollapsingKey(userID, galleryID),
-		model.PendingQueueKey,
-	}
-	args := []interface{}{archiveURL, cacheTTL, nodeID, actualGP}
+func (s *Scheduler) CompleteTask(ctx context.Context, traceID, nodeID, archiveURL string) error {
+	keys := []string{model.TaskKey(traceID)}
+	args := []interface{}{archiveURL, int(s.cfg.CacheTTL.Seconds()), nodeID, traceID}
 
 	status, err := s.completeScript.Run(ctx, s.rdb, keys, args...).Text()
 	if err != nil {
@@ -134,16 +136,33 @@ func (s *Scheduler) CompleteTask(ctx context.Context, traceID, nodeID, archiveUR
 	return nil
 }
 
-// GetCachedResult checks the per-user cache.
-func (s *Scheduler) GetCachedResult(ctx context.Context, userID, galleryID string) (*string, error) {
-	data, err := s.rdb.Get(ctx, model.CacheKey(userID, galleryID)).Result()
-	if err == redis.Nil {
-		return nil, nil
-	}
+// UpdateTaskCost sets task metadata used for node claim strategy and billing.
+func (s *Scheduler) UpdateTaskCost(ctx context.Context, traceID string, freeTier bool, estimatedGP int) error {
+	err := s.rdb.HSet(ctx, model.TaskKey(traceID), map[string]interface{}{
+		"free_tier":    boolToFlag(freeTier),
+		"estimated_gp": estimatedGP,
+	}).Err()
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("update task cost: %w", err)
 	}
-	return &data, nil
+	return nil
+}
+
+// CancelTask removes a not-yet-processing task and clears its collapse key.
+func (s *Scheduler) CancelTask(ctx context.Context, traceID, userID, galleryID string) error {
+	keys := []string{
+		model.TaskKey(traceID),
+		model.CollapsingKey(userID, galleryID),
+		model.PendingQueueKey,
+	}
+	result, err := s.cancelScript.Run(ctx, s.rdb, keys, traceID).Text()
+	if err != nil {
+		return fmt.Errorf("cancel task lua: %w", err)
+	}
+	if result == "NOT_CANCELLED" {
+		return fmt.Errorf("cancel task: task already processing or completed")
+	}
+	return nil
 }
 
 // PendingQueueLen returns the current length of the pending queue.
@@ -190,14 +209,21 @@ func (s *Scheduler) reclaimExpiredTasks(ctx context.Context) {
 		limit = 100
 	}
 
-	leaseTTL := int(s.cfg.TaskLeaseTTL.Seconds())
-	reclaimThreshold := leaseTTL / 2 // Reclaim if TTL < 50% of lease
-
+	// Collect all traceIDs first, then process.
+	// This avoids index shifting when LREM modifies the list during iteration.
+	traceIDs := make([]string, 0, limit)
 	for i := int64(0); i < limit; i++ {
 		traceID, err := s.rdb.LIndex(ctx, model.PendingQueueKey, i).Result()
 		if err != nil {
-			continue
+			break
 		}
+		traceIDs = append(traceIDs, traceID)
+	}
+
+	leaseTTL := int(s.cfg.TaskLeaseTTL.Seconds())
+	reclaimThreshold := leaseTTL / 2 // Reclaim if TTL < 50% of lease
+
+	for _, traceID := range traceIDs {
 		taskKey := model.TaskKey(traceID)
 
 		// Check if task exists
@@ -227,7 +253,7 @@ func (s *Scheduler) reclaimExpiredTasks(ctx context.Context) {
 				model.CollapsingKey(userID, galleryID),
 				model.PendingQueueKey,
 			}
-			args := []interface{}{leaseTTL}
+			args := []interface{}{leaseTTL, traceID}
 
 			result, err := s.reclaimScript.Run(ctx, s.rdb, keys, args...).Text()
 			if err != nil {

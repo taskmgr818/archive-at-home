@@ -11,7 +11,6 @@ import (
 	"github.com/taskmgr818/archive-at-home/server/internal/model"
 	"github.com/taskmgr818/archive-at-home/server/internal/node"
 	"github.com/taskmgr818/archive-at-home/server/internal/service"
-	"github.com/taskmgr818/archive-at-home/server/internal/store"
 	"github.com/taskmgr818/archive-at-home/server/internal/ws"
 )
 
@@ -19,17 +18,15 @@ import (
 type Handler struct {
 	svc      *service.GalleryService
 	hub      *ws.Hub
-	store    *store.Store
 	nodeAuth *node.Authenticator
 	upgrader websocket.Upgrader
 }
 
 // NewHandler creates the handler set.
-func NewHandler(svc *service.GalleryService, hub *ws.Hub, store *store.Store, nodeAuth *node.Authenticator) *Handler {
+func NewHandler(svc *service.GalleryService, hub *ws.Hub, nodeAuth *node.Authenticator) *Handler {
 	return &Handler{
 		svc:      svc,
 		hub:      hub,
-		store:    store,
 		nodeAuth: nodeAuth,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,

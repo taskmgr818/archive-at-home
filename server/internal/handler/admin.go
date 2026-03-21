@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -56,7 +57,7 @@ func (h *AdminHandler) GetUser(c *gin.Context) {
 	var balance int64
 	acc, err := h.balanceSvc.GetAccount(ctx, userID)
 	if err == nil {
-		balance = acc.Balance - acc.Frozen
+		balance = acc.Available()
 	}
 
 	c.JSON(http.StatusOK, model.UserProfile{
@@ -93,17 +94,11 @@ func (h *AdminHandler) SetUserStatus(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
-
-	// Check if user exists
-	_, err := h.userSvc.GetByID(ctx, userID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
-		return
-	}
-
-	// Update status
-	if err := h.userSvc.SetStatus(ctx, userID, req.Status); err != nil {
+	if err := h.userSvc.SetStatus(c.Request.Context(), userID, req.Status); err != nil {
+		if errors.Is(err, auth.ErrUserNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update status"})
 		return
 	}

@@ -81,7 +81,7 @@ func main() {
 	r.Use(middleware.CORS())
 	r.Use(middleware.Logger())
 
-	h := handler.NewHandler(svc, hub, st, nodeAuth)
+	h := handler.NewHandler(svc, hub, nodeAuth)
 	authHandler := handler.NewAuthHandler(userSvc, cfg)
 	userHandler := handler.NewUserHandler(userSvc, balanceSvc, cfg)
 	adminHandler := handler.NewAdminHandler(userSvc, balanceSvc)

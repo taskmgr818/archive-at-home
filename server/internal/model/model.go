@@ -1,8 +1,6 @@
 package model
 
-import (
-	"time"
-)
+import "time"
 
 // ─────────────────────────────────────────────
 // Task State Machine
@@ -17,24 +15,8 @@ const (
 )
 
 // ─────────────────────────────────────────────
-// Core Domain Models
+// Redis Key Builders
 // ─────────────────────────────────────────────
-
-// Task represents a parsing job dispatched to worker nodes.
-type Task struct {
-	TraceID     string     `json:"trace_id"`
-	UserID      string     `json:"user_id"`
-	GalleryID   string     `json:"gallery_id"`
-	GalleryKey  string     `json:"gallery_key"` // e-hentai gallery token/key
-	Status      TaskStatus `json:"status"`
-	NodeID      string     `json:"node_id,omitempty"`
-	Force       bool       `json:"force"`
-	FreeTier    bool       `json:"free_tier"`    // whether free download quota is available
-	EstimatedGP int        `json:"estimated_gp"` // Pre-estimated GP cost for node scheduling and user billing
-	ActualGP    int        `json:"actual_gp"`    // actual GP consumed by the node
-	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   time.Time  `json:"expires_at"`
-}
 
 // CacheKey builds the per-user cache key: "cache:{UserID}:{GalleryID}"
 func CacheKey(userID, galleryID string) string {

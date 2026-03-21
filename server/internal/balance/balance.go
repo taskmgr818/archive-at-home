@@ -21,6 +21,11 @@ type Account struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Available returns usable GP (total balance minus frozen).
+func (a *Account) Available() int64 {
+	return a.Balance - a.Frozen
+}
+
 // TransactionType categorises ledger entries.
 type TransactionType string
 
@@ -57,10 +62,6 @@ type BalanceService interface {
 
 	// Deposit adds GP to a user's balance.
 	Deposit(ctx context.Context, userID string, amount int64, remark string) (*Account, error)
-
-	// CanAfford checks whether the user can cover the estimated GP cost.
-	// Takes into account balance + free quota.
-	CanAfford(ctx context.Context, userID string, estimatedGP int64) (bool, error)
 
 	// FreezeGP reserves GP for an in-flight task.
 	// Returns error if insufficient balance.
