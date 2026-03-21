@@ -250,11 +250,11 @@ func (c *Client) GetArchiveURL(gid, token string) (archiveURL string, actualGP i
 	if costText == "Free!" {
 		actualGP = 0
 	} else {
-		// Extract digits from cost text (e.g., "50 GP")
-		digitRe := regexp.MustCompile(`\d+`)
-		digitMatch := digitRe.FindString(costText)
-		if digitMatch != "" {
-			actualGP, err = strconv.Atoi(digitMatch)
+		// Extract numeric cost and support comma-separated values (e.g., "1,234 GP")
+		numberRe := regexp.MustCompile(`[\d,]+`)
+		numberMatch := numberRe.FindString(costText)
+		if numberMatch != "" {
+			actualGP, err = strconv.Atoi(strings.ReplaceAll(numberMatch, ",", ""))
 			if err != nil {
 				return "", 0, 0, fmt.Errorf("parse cost failed: %w", err)
 			}

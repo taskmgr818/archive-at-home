@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -101,13 +102,14 @@ func (db *DB) InsertParseLog(log *ParseLog) error {
 // ParseSizeToMiB parses size string (e.g., "59.77 MiB", "1.5 GiB", "512.3 KiB") to MiB
 func ParseSizeToMiB(sizeStr string) (float64, error) {
 	// Match pattern like "59.77 MiB" or "1.5 GiB"
-	re := regexp.MustCompile(`^([\d.]+)\s*(KiB|MiB|GiB)$`)
+	re := regexp.MustCompile(`^([\d,.]+)\s*(KiB|MiB|GiB)$`)
 	matches := re.FindStringSubmatch(sizeStr)
 	if len(matches) < 3 {
 		return 0, fmt.Errorf("invalid size format: %s", sizeStr)
 	}
 
-	value, err := strconv.ParseFloat(matches[1], 64)
+	valueText := strings.ReplaceAll(matches[1], ",", "")
+	value, err := strconv.ParseFloat(valueText, 64)
 	if err != nil {
 		return 0, fmt.Errorf("parse size value failed: %w", err)
 	}
